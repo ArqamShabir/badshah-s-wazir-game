@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { ref, onValue, set, update, remove, push, get } from 'firebase/database';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ref, onValue, set, update, remove, push, get, onDisconnect } from 'firebase/database';
 import { db } from '@/lib/firebase';
 import { Room, Player, Role, GameStage, ROLE_SCORES } from '@/types/game';
 import { useAuth } from '@/contexts/AuthContext';
@@ -22,12 +22,16 @@ const shuffleArray = <T,>(array: T[]): T[] => {
   return shuffled;
 };
 
+const STALE_PLAYER_MS = 5 * 60_000; // 5 minutes before pruning stale players
+
 export const useRoom = (roomId: string | null) => {
   const { user } = useAuth();
   const [room, setRoom] = useState<Room | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const presenceRef = useRef<ReturnType<typeof ref> | null>(null);
 
   // Listen to room changes
   useEffect(() => {
@@ -65,11 +69,26 @@ export const useRoom = (roomId: string | null) => {
     const unsubPlayers = onValue(playersRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
-        const playerList = Object.entries(data).map(([uid, player]: [string, any]) => ({
-          uid,
-          ...player,
-        }));
+        const now = Date.now();
+        const stale: string[] = [];
+        const playerList = Object.entries(data).map(([uid, player]: [string, any]) => {
+          if (player.lastSeen && now - player.lastSeen > STALE_PLAYER_MS) {
+            stale.push(uid);
+          }
+          return {
+            uid,
+            ...player,
+          };
+        });
         setPlayers(playerList.sort((a, b) => a.createdAt - b.createdAt));
+
+        if (stale.length) {
+          const updates: Record<string, null> = {};
+          stale.forEach((uid) => {
+            updates[uid] = null;
+          });
+          void update(playersRef, updates);
+        }
       } else {
         setPlayers([]);
       }
@@ -78,6 +97,14 @@ export const useRoom = (roomId: string | null) => {
     return () => {
       unsubRoom();
       unsubPlayers();
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+      if (presenceRef.current) {
+        void onDisconnect(presenceRef.current).cancel();
+        presenceRef.current = null;
+      }
     };
   }, [roomId]);
 
@@ -97,7 +124,8 @@ export const useRoom = (roomId: string | null) => {
     });
 
     // Add host as first player
-    await set(ref(db, `rooms/${roomCode}/players/${user.uid}`), {
+    const hostPlayerRef = ref(db, `rooms/${roomCode}/players/${user.uid}`);
+    await set(hostPlayerRef, {
       displayName: user.displayName || 'Player',
       avatar: user.photoURL || '',
       privateRole: null,
@@ -105,7 +133,16 @@ export const useRoom = (roomId: string | null) => {
       revealed: false,
       score: 0,
       createdAt: Date.now(),
+      lastSeen: Date.now(),
     });
+    await onDisconnect(hostPlayerRef).remove();
+    presenceRef.current = hostPlayerRef;
+    if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (presenceRef.current) {
+        void update(presenceRef.current, { lastSeen: Date.now() });
+      }
+    }, 5000);
 
     return roomCode;
   }, [user]);
@@ -141,8 +178,20 @@ export const useRoom = (roomId: string | null) => {
         revealed: false,
         score: 0,
         createdAt: Date.now(),
+        lastSeen: Date.now(),
       });
+    } else {
+      await update(playerRef, { lastSeen: Date.now() });
     }
+
+    await onDisconnect(playerRef).remove();
+    presenceRef.current = playerRef;
+    if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (presenceRef.current) {
+        void update(presenceRef.current, { lastSeen: Date.now() });
+      }
+    }, 5000);
 
     return true;
   }, [user]);
@@ -151,6 +200,7 @@ export const useRoom = (roomId: string | null) => {
     if (!user || !roomId) return;
 
     const playerRef = ref(db, `rooms/${roomId}/players/${user.uid}`);
+    await onDisconnect(playerRef).cancel();
     await remove(playerRef);
 
     // If host leaves and there are other players, assign new host

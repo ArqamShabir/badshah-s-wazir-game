@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { User, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
 
 interface AuthContextType {
@@ -35,7 +35,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithGoogle = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
+      // Some environments block popup window access due to COOP; fall back to redirect which avoids window.closed checks.
+      if (error?.message?.includes('Cross-Origin-Opener-Policy') || error?.code === 'auth/operation-not-supported-in-this-environment') {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
       console.error('Error signing in with Google:', error);
       throw error;
     }

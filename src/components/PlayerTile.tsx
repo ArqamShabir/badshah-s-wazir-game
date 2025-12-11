@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Player, Role, ROLE_NAMES, ROLE_COLORS } from '@/types/game';
 import { cn } from '@/lib/utils';
-import { Eye, EyeOff, User, Target } from 'lucide-react';
+import { Eye, EyeOff, User, Target, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 
 interface PlayerTileProps {
   player: Player;
@@ -10,6 +10,11 @@ interface PlayerTileProps {
   isSelected?: boolean;
   onSelect?: () => void;
   showPrivateRole?: boolean;
+  mediaStream?: MediaStream;
+  onToggleAudio?: () => void;
+  onToggleVideo?: () => void;
+  isAudioEnabled?: boolean;
+  isVideoEnabled?: boolean;
 }
 
 const getRoleEmoji = (role: Role | null): string => {
@@ -29,52 +34,37 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
   isSelected = false,
   onSelect,
   showPrivateRole = false,
+  mediaStream,
+  onToggleAudio,
+  onToggleVideo,
+  isAudioEnabled,
+  isVideoEnabled,
 }) => {
   const displayRole = player.revealed ? player.publicRole : (showPrivateRole ? player.privateRole : null);
+  const displayName = player.displayName?.trim() || 'Player';
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [hasStream, setHasStream] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isCurrentUser) return;
-    let activeStream: MediaStream | null = null;
+    if (!videoRef.current) return;
 
-    const startStream = async () => {
-      if (!navigator?.mediaDevices?.getUserMedia) {
-        setStreamError('Camera/Mic not supported');
-        setHasStream(false);
-        return;
-      }
+    if (!mediaStream) {
+      videoRef.current.srcObject = null;
+      setStreamError(null);
+      return;
+    }
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-          audio: true,
-        });
-        activeStream = stream;
-        setHasStream(true);
-        setStreamError(null);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.muted = true;
-          const playPromise = videoRef.current.play();
-          if (playPromise instanceof Promise) {
-            playPromise.catch(() => {});
-          }
-        }
-      } catch (err) {
-        console.error('Media capture failed', err);
-        setHasStream(false);
-        setStreamError(window.isSecureContext ? 'Camera/Mic unavailable' : 'Enable HTTPS / permissions');
-      }
-    };
-
-    startStream();
-
-    return () => {
-      activeStream?.getTracks().forEach((track) => track.stop());
-    };
-  }, [isCurrentUser]);
+    videoRef.current.srcObject = mediaStream;
+    videoRef.current.muted = isCurrentUser;
+    setStreamError(null);
+    const playPromise = videoRef.current.play();
+    if (playPromise instanceof Promise) {
+      playPromise.catch((err) => {
+        console.warn("Video autoplay blocked", err);
+        setStreamError("Tap to allow video playback");
+      });
+    }
+  }, [mediaStream, isCurrentUser, isVideoEnabled]);
 
   const initials = player.displayName
     ? player.displayName
@@ -84,15 +74,21 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
         .join('')
         .slice(0, 2)
         .toUpperCase()
-    : '';
+    : displayName
+        .trim()
+        .split(/\s+/)
+        .map((n) => n[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase();
   
   return (
     <div
       onClick={canSelect ? onSelect : undefined}
       className={cn(
-        "relative w-full h-full min-h-[200px] rounded-2xl overflow-hidden transition-all duration-300",
-        "aspect-video",
-        "flex flex-col items-center justify-center p-4",
+        "relative w-full max-w-[320px] sm:max-w-[340px] md:max-w-[360px]",
+        "aspect-square rounded-2xl overflow-hidden transition-all duration-300",
+        "flex flex-col items-center justify-center p-4 mx-auto",
         "gradient-card shadow-card border-2",
         isCurrentUser && "ring-2 ring-primary ring-offset-2",
         canSelect && "cursor-pointer hover:scale-[1.02] hover:shadow-glow",
@@ -103,13 +99,12 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
     >
       {/* Video / Avatar */}
       <div className="absolute inset-0 bg-muted/20 z-0">
-        {hasStream ? (
+        {mediaStream && (!isCurrentUser || isVideoEnabled !== false) ? (
           <video
             ref={videoRef}
             className="w-full h-full object-cover"
             playsInline
             autoPlay
-            muted
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground bg-muted/40">
@@ -117,7 +112,7 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
               {player.avatar ? (
                 <img 
                   src={player.avatar} 
-                  alt={player.displayName}
+                  alt={displayName}
                   className="w-full h-full object-cover"
                 />
               ) : initials ? (
@@ -127,11 +122,45 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
               )}
             </div>
             <p className="text-xs opacity-60">
-              {streamError ? streamError : 'Waiting for video / avatar'}
+              {streamError ? streamError : (isCurrentUser && isVideoEnabled === false ? 'Video off' : 'Waiting for video / avatar')}
             </p>
           </div>
         )}
       </div>
+
+      {/* Self controls */}
+      {isCurrentUser && (
+        <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleVideo?.();
+            }}
+            className={cn(
+              "w-10 h-10 rounded-full bg-background/80 backdrop-blur border border-border/60 shadow-soft flex items-center justify-center transition",
+              isVideoEnabled === false && "bg-red-100 text-red-600 border-red-200"
+            )}
+            aria-label={isVideoEnabled === false ? "Turn video on" : "Turn video off"}
+          >
+            {isVideoEnabled === false ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleAudio?.();
+            }}
+            className={cn(
+              "w-10 h-10 rounded-full bg-background/80 backdrop-blur border border-border/60 shadow-soft flex items-center justify-center transition",
+              isAudioEnabled === false && "bg-red-100 text-red-600 border-red-200"
+            )}
+            aria-label={isAudioEnabled === false ? "Unmute microphone" : "Mute microphone"}
+          >
+            {isAudioEnabled === false ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </button>
+        </div>
+      )}
 
       {/* Role card overlay (when revealed or showing private) */}
       {displayRole && (
@@ -166,7 +195,7 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
             </span>
           )}
           <span className="font-semibold truncate text-sm">
-            {player.displayName}
+            {displayName}
           </span>
         </div>
         <div className="shrink-0 flex items-center gap-2">
