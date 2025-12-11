@@ -6,13 +6,13 @@ import { getDatabase } from 'firebase/database';
 // TODO: Replace these with your Firebase project credentials from:
 // Firebase Console → Project Settings → General → Your apps → Firebase SDK snippet
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",           // e.g., "AIzaSyC..."
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT.firebaseio.com",  // Must be valid URL format
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abc123",
+  apiKey: "AIzaSyD_Nc00UbI3KGsXDFdeWbwAYnIRuBYjvfc",           // e.g., "AIzaSyC..."
+  authDomain: "bwqc-e3d63.firebaseapp.com",
+  databaseURL: "https://bwqc-e3d63-default-rtdb.firebaseio.com",  // Must be valid URL format
+  projectId: "bwqc-e3d63",
+  storageBucket: "bwqc-e3d63.firebasestorage.app",
+  messagingSenderId: "297300167048",
+  appId: "1:297300167048:web:0ebea452baae5152f1923d",
 };
 
 const app = initializeApp(firebaseConfig);

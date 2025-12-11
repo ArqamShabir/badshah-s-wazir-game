@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Player, Role, ROLE_NAMES, ROLE_COLORS } from '@/types/game';
 import { cn } from '@/lib/utils';
-import { Crown, Eye, EyeOff, User, Target } from 'lucide-react';
+import { Eye, EyeOff, User, Target } from 'lucide-react';
 
 interface PlayerTileProps {
   player: Player;
@@ -31,12 +31,67 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
   showPrivateRole = false,
 }) => {
   const displayRole = player.revealed ? player.publicRole : (showPrivateRole ? player.privateRole : null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [hasStream, setHasStream] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCurrentUser) return;
+    let activeStream: MediaStream | null = null;
+
+    const startStream = async () => {
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        setStreamError('Camera/Mic not supported');
+        setHasStream(false);
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480 },
+          audio: true,
+        });
+        activeStream = stream;
+        setHasStream(true);
+        setStreamError(null);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.muted = true;
+          const playPromise = videoRef.current.play();
+          if (playPromise instanceof Promise) {
+            playPromise.catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.error('Media capture failed', err);
+        setHasStream(false);
+        setStreamError(window.isSecureContext ? 'Camera/Mic unavailable' : 'Enable HTTPS / permissions');
+      }
+    };
+
+    startStream();
+
+    return () => {
+      activeStream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [isCurrentUser]);
+
+  const initials = player.displayName
+    ? player.displayName
+        .trim()
+        .split(/\s+/)
+        .map((n) => n[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase()
+    : '';
   
   return (
     <div
       onClick={canSelect ? onSelect : undefined}
       className={cn(
         "relative w-full h-full min-h-[200px] rounded-2xl overflow-hidden transition-all duration-300",
+        "aspect-video",
         "flex flex-col items-center justify-center p-4",
         "gradient-card shadow-card border-2",
         isCurrentUser && "ring-2 ring-primary ring-offset-2",
@@ -46,28 +101,42 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
         !player.revealed && "border-border/50"
       )}
     >
-      {/* Video placeholder */}
-      <div className="absolute inset-0 flex items-center justify-center bg-muted/30">
-        <div className="text-center text-muted-foreground">
-          <div className="w-16 h-16 mx-auto mb-2 rounded-full bg-muted flex items-center justify-center">
-            {player.avatar ? (
-              <img 
-                src={player.avatar} 
-                alt={player.displayName}
-                className="w-full h-full rounded-full object-cover"
-              />
-            ) : (
-              <User className="w-8 h-8" />
-            )}
+      {/* Video / Avatar */}
+      <div className="absolute inset-0 bg-muted/20 z-0">
+        {hasStream ? (
+          <video
+            ref={videoRef}
+            className="w-full h-full object-cover"
+            playsInline
+            autoPlay
+            muted
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground bg-muted/40">
+            <div className="w-20 h-20 mx-auto mb-2 rounded-full bg-gradient-to-br from-primary/30 to-secondary/30 border border-border/50 flex items-center justify-center overflow-hidden">
+              {player.avatar ? (
+                <img 
+                  src={player.avatar} 
+                  alt={player.displayName}
+                  className="w-full h-full object-cover"
+                />
+              ) : initials ? (
+                <span className="text-xl font-semibold text-foreground/80">{initials}</span>
+              ) : (
+                <User className="w-8 h-8" />
+              )}
+            </div>
+            <p className="text-xs opacity-60">
+              {streamError ? streamError : 'Waiting for video / avatar'}
+            </p>
           </div>
-          <p className="text-xs opacity-60">Live video</p>
-        </div>
+        )}
       </div>
 
       {/* Role card overlay (when revealed or showing private) */}
       {displayRole && (
         <div className={cn(
-          "absolute inset-0 flex flex-col items-center justify-center",
+          "absolute inset-0 flex flex-col items-center justify-center z-10",
           "bg-gradient-to-br from-background/90 to-background/70 backdrop-blur-sm",
           "animate-scale-in"
         )}>

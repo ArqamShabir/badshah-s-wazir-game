@@ -138,15 +138,15 @@ const GameRoom: React.FC = () => {
     <div className="min-h-screen gradient-sunny flex flex-col">
       {/* Top Controls */}
       <header className="sticky top-0 z-40 bg-card/80 backdrop-blur-md border-b border-border/50 shadow-soft">
-        <div className="flex items-center justify-between p-3 gap-2">
+        <div className="flex flex-wrap items-center gap-2 p-2 sm:p-3 md:gap-3 justify-between">
           {/* Left: Back + Room code */}
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={handleLeave}>
+          <div className="flex items-center gap-2 flex-1 min-w-[220px] sm:min-w-[260px]">
+            <Button variant="ghost" size="icon" onClick={handleLeave} className="shrink-0">
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <button
               onClick={handleCopyCode}
-              className="flex items-center gap-2 bg-muted/50 hover:bg-muted px-3 py-1.5 rounded-lg transition-colors"
+              className="flex items-center gap-2 bg-muted/50 hover:bg-muted px-3 py-1.5 rounded-lg transition-colors w-full sm:w-auto justify-center"
             >
               <span className="font-mono font-bold tracking-wider text-sm">{roomId}</span>
               {copied ? (
@@ -158,24 +158,26 @@ const GameRoom: React.FC = () => {
           </div>
 
           {/* Center: Status */}
-          <Badge variant="secondary" className="px-3 py-1">
-            <Timer className="w-3 h-3 mr-1" />
-            {STAGE_LABELS[room.stage]}
-          </Badge>
+          <div className="flex justify-center flex-1 min-w-[180px]">
+            <Badge variant="secondary" className="px-3 py-1 w-full sm:w-auto justify-center">
+              <Timer className="w-3 h-3 mr-1" />
+              {STAGE_LABELS[room.stage]}
+            </Badge>
+          </div>
 
           {/* Right: Player count + Round */}
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="gap-1">
+          <div className="flex items-center gap-2 flex-1 justify-end min-w-[170px]">
+            <Badge variant="outline" className="gap-1 shrink-0">
               <Users className="w-3 h-3" />
               {players.length}/4
             </Badge>
-            <Badge variant="outline">R{room.round}</Badge>
-          </div>
-        </div>
+            <Badge variant="outline" className="shrink-0">R{room.round}</Badge>
+       
+       
 
         {/* Host controls */}
         {isHost && (
-          <div className="flex items-center gap-2 px-3 pb-3 overflow-x-auto">
+          <div className="flex items-center gap-2 px-3 overflow-x-auto">
             <Button
               size="sm"
               onClick={handleDeal}
@@ -192,7 +194,8 @@ const GameRoom: React.FC = () => {
             )}
           </div>
         )}
-
+ </div>
+    </div>
         {/* Player action controls */}
         {!isHost && (
           <div className="flex items-center gap-2 px-3 pb-3 overflow-x-auto">
@@ -244,7 +247,7 @@ const GameRoom: React.FC = () => {
 
       {/* 2x2 Grid */}
       <main className="flex-1 p-3 md:p-6">
-        <div className="h-full grid grid-cols-2 gap-3 md:gap-4 max-w-4xl mx-auto">
+        <div className="h-full grid grid-cols-1 sm:grid-cols-2 grid-rows-2 auto-rows-fr gap-3 md:gap-4">
           {players.map((player) => (
             <PlayerTile
               key={player.uid}
