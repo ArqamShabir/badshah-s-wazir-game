@@ -17,6 +17,8 @@ export const useVideoChat = (
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
 
   const socketRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
   const localStreamRef = useRef<MediaStream | null>(null);
 
@@ -155,15 +157,32 @@ export const useVideoChat = (
       }
     };
 
+    const scheduleReconnect = () => {
+      if (!isMounted) return;
+      if (reconnectTimeoutRef.current) return;
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 8000);
+      reconnectAttemptsRef.current += 1;
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        initSocket();
+      }, delay);
+    };
+
     const initSocket = () => {
-      const url =
-        (import.meta.env.VITE_SIGNALING_URL || "ws://localhost:4100").trim();
+      if (!isMounted) return;
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) return;
+
+      // Default to same host /signal via ws or wss to avoid hardcoded localhost in production
+      const fallbackHost = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/signal`;
+      const url = (import.meta.env.VITE_SIGNALING_URL || fallbackHost).trim();
 
       console.log("[useVideoChat] connecting to", url);
       socketRef.current = new WebSocket(url);
 
       socketRef.current.onopen = () => {
         console.log("[useVideoChat] ws open");
+        reconnectAttemptsRef.current = 0;
+        setError(null);
         socketRef.current?.send(
           JSON.stringify({ type: "join", room: roomId, from: selfId })
         );
@@ -217,6 +236,8 @@ export const useVideoChat = (
         console.log("[useVideoChat] ws closed");
         Object.keys(peersRef.current).forEach(teardownPeer);
         setError((prev) => prev || "Signaling disconnected");
+        socketRef.current = null;
+        scheduleReconnect();
       };
 
       socketRef.current.onerror = () => {
@@ -266,11 +287,25 @@ export const useVideoChat = (
 
     setupLocalStream();
 
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && !socketRef.current) {
+        reconnectAttemptsRef.current = 0;
+        initSocket();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       isMounted = false;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       Object.keys(peersRef.current).forEach(teardownPeer);
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       socketRef.current?.close();
+      socketRef.current = null;
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [roomId, selfId]);
 
