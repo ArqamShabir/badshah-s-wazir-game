@@ -78,12 +78,8 @@ export const useVideoChat = (
 
       pc.ontrack = (event) => {
         const [stream] = event.streams;
-        if (!stream) return;
-        setStreams((prev) => {
-          const next = { ...prev, [peerId]: stream };
-          console.log("[useVideoChat] remote track for", peerId, "streams keys:", Object.keys(next));
-          return next;
-        });
+        if (!stream || peerId === selfId) return; // ignore any self-looped tracks
+        setStreams((prev) => ({ ...prev, [peerId]: stream }));
       };
 
       pc.onconnectionstatechange = () => {
@@ -180,11 +176,9 @@ export const useVideoChat = (
         url = url.replace(/^ws:\/\//, "wss://");
       }
 
-      console.log("[useVideoChat] connecting to", url);
       socketRef.current = new WebSocket(url);
 
       socketRef.current.onopen = () => {
-        console.log("[useVideoChat] ws open");
         reconnectAttemptsRef.current = 0;
         setError(null);
         socketRef.current?.send(
@@ -204,7 +198,6 @@ export const useVideoChat = (
         switch (type) {
           case "peers": {
             const peers: string[] = payload || [];
-            console.log("[useVideoChat] peers list", peers);
             peers
               .filter((peerId) => peerId && peerId !== selfId)
               .forEach((peerId) => {
@@ -214,21 +207,17 @@ export const useVideoChat = (
           }
           case "peer-join":
             // Existing peers don't need to act; joiner gets "peers" and calls createOffer
-            console.log("[useVideoChat] peer-join", from);
             break;
           case "offer":
-            console.log("[useVideoChat] offer from", from);
             if (from && payload) await handleOffer(from, payload);
             break;
           case "answer":
-            console.log("[useVideoChat] answer from", from);
             if (from && payload) await handleAnswer(from, payload);
             break;
           case "ice":
             if (from && payload) await handleIceCandidate(from, payload);
             break;
           case "peer-leave":
-            console.log("[useVideoChat] peer-leave", from);
             if (from) teardownPeer(from);
             break;
           default:
@@ -237,7 +226,6 @@ export const useVideoChat = (
       };
 
       socketRef.current.onclose = () => {
-        console.log("[useVideoChat] ws closed");
         Object.keys(peersRef.current).forEach(teardownPeer);
         setError((prev) => prev || "Signaling disconnected");
         socketRef.current = null;
@@ -245,14 +233,12 @@ export const useVideoChat = (
       };
 
       socketRef.current.onerror = () => {
-        console.error("[useVideoChat] ws error");
         setError("Cannot reach signaling server");
       };
     };
 
     const setupLocalStream = async () => {
       try {
-        console.log("[useVideoChat] requesting media");
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480 },
           audio: true,
@@ -264,11 +250,7 @@ export const useVideoChat = (
         localStreamRef.current = stream;
         setIsAudioEnabled(stream.getAudioTracks().some((t) => t.enabled !== false));
         setIsVideoEnabled(stream.getVideoTracks().some((t) => t.enabled !== false));
-        setStreams((prev) => {
-          const next = { ...prev, [selfId]: stream };
-          console.log("[useVideoChat] local stream for", selfId, "streams keys:", Object.keys(next));
-          return next;
-        });
+        setStreams((prev) => ({ ...prev, [selfId]: stream }));
         // Attach tracks to any peers that may already exist
         Object.values(peersRef.current).forEach((pc) => {
           if (pc) {
