@@ -1,15 +1,3 @@
-// server/signaling.cjs
-// Minimal WebRTC mesh signaling server using ws + express.
-//
-// Run locally:
-//   node server/signaling.cjs
-// or via npm script:
-//   "server": "node server/signaling.cjs"
-//
-// Env (optional):
-//   SIGNALING_PORT  (defaults to 4100)
-//   SIGNALING_HOST  (defaults to 0.0.0.0)
-
 require('dotenv').config();
 const http = require('http');
 const express = require('express');

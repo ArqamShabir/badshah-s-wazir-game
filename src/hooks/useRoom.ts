@@ -227,6 +227,7 @@ export const useRoom = (roomId: string | null) => {
     
     const updates: Record<string, any> = {
       stage: 'badshah_reveal',
+      timerEndsAt: Date.now() + 30_000,
       guessTarget: null,
     };
 
@@ -252,6 +253,7 @@ export const useRoom = (roomId: string | null) => {
 
     await update(ref(db, `rooms/${roomId}`), {
       stage: 'vizier_reveal',
+      timerEndsAt: Date.now() + 30_000,
     });
   }, [user, roomId, players]);
 
@@ -268,6 +270,7 @@ export const useRoom = (roomId: string | null) => {
 
     await update(ref(db, `rooms/${roomId}`), {
       stage: 'vizier_guess',
+      timerEndsAt: Date.now() + 30_000,
     });
   }, [user, roomId, players]);
 
@@ -280,6 +283,7 @@ export const useRoom = (roomId: string | null) => {
     await update(ref(db, `rooms/${roomId}`), {
       guessTarget: targetUid,
       stage: 'final_reveal',
+      timerEndsAt: null,
     });
 
     // Reveal all players
@@ -320,6 +324,7 @@ export const useRoom = (roomId: string | null) => {
       stage: 'waiting',
       guessTarget: null,
       round: (room?.round || 0) + 1,
+      timerEndsAt: null,
     };
 
     players.forEach(player => {

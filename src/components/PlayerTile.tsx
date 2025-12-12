@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Player, Role, ROLE_NAMES, ROLE_COLORS } from '@/types/game';
 import { cn } from '@/lib/utils';
-import { Eye, EyeOff, User, Target, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { User, Target, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 
 interface PlayerTileProps {
   player: Player;
@@ -15,6 +15,7 @@ interface PlayerTileProps {
   onToggleVideo?: () => void;
   isAudioEnabled?: boolean;
   isVideoEnabled?: boolean;
+  timerText?: string | null;
 }
 
 const getRoleEmoji = (role: Role | null): string => {
@@ -39,6 +40,7 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
   onToggleVideo,
   isAudioEnabled,
   isVideoEnabled,
+  timerText,
 }) => {
   const displayRole = player.revealed ? player.publicRole : (showPrivateRole ? player.privateRole : null);
   const displayName = player.displayName?.trim() || 'Player';
@@ -86,8 +88,8 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
     <div
       onClick={canSelect ? onSelect : undefined}
       className={cn(
-        "relative w-full max-w-[320px] sm:max-w-[340px] md:max-w-[360px]",
-        "aspect-square rounded-2xl overflow-hidden transition-all duration-300",
+        "relative w-full max-w-[360px] sm:max-w-[380px] md:max-w-[420px]",
+        "aspect-[2/3] md:aspect-[3/2] rounded-2xl overflow-hidden transition-all duration-300",
         "flex flex-col items-center justify-center p-4 mx-auto",
         "gradient-card shadow-card border-2",
         isCurrentUser && "ring-2 ring-primary ring-offset-2",
@@ -127,6 +129,14 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
           </div>
         )}
       </div>
+
+      {timerText && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20">
+          <span className="px-3 py-1 rounded-full bg-background/90 backdrop-blur text-xs font-semibold border border-border/60 shadow-soft">
+            {timerText}
+          </span>
+        </div>
+      )}
 
       {/* Self controls */}
       {isCurrentUser && (
@@ -200,11 +210,6 @@ const PlayerTile: React.FC<PlayerTileProps> = ({
         </div>
         <div className="shrink-0 flex items-center gap-2">
           <span className="text-sm font-bold text-primary">{player.score}</span>
-          {player.revealed ? (
-            <Eye className="w-4 h-4 text-accent" />
-          ) : (
-            <EyeOff className="w-4 h-4 text-muted-foreground" />
-          )}
         </div>
       </div>
 

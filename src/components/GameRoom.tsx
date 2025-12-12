@@ -17,7 +17,9 @@ import {
   Check, 
   ArrowLeft,
   Users,
-  Timer
+  Timer,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { GameStage } from '@/types/game';
@@ -55,12 +57,17 @@ const GameRoom: React.FC = () => {
 
   const [copied, setCopied] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
+  const [timerText, setTimerText] = useState<string | null>(null);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
 
   const selfId = currentPlayer?.uid || user?.uid;
   const { streams, error: videoError, toggleAudio, toggleVideo, isAudioEnabled, isVideoEnabled } = useVideoChat(
     roomId || null,
     selfId
   );
+
+  const badshahAudioRef = useRef<HTMLAudioElement | null>(null);
+  const vizierAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Ensure the current user is present in the room even when navigating via shared links
   const joinInFlightRef = useRef(false);
@@ -97,7 +104,7 @@ const GameRoom: React.FC = () => {
     navigate('/');
   };
 
-  const handleDeal = async () => {
+  const handleStart = async () => {
     try {
       await dealRoles();
       toast({ title: 'Cards dealt!', description: 'Check your role!' });
@@ -108,11 +115,19 @@ const GameRoom: React.FC = () => {
 
   const handleRevealBadshah = async () => {
     await revealBadshah();
+    if (!badshahAudioRef.current) {
+      badshahAudioRef.current = new Audio('/audio/badshah.mp3');
+    }
+    void badshahAudioRef.current.play().catch(() => {});
     toast({ title: 'Badshah revealed!', description: 'Now Vizier must reveal.' });
   };
 
   const handleRevealVizier = async () => {
     await revealVizier();
+    if (!vizierAudioRef.current) {
+      vizierAudioRef.current = new Audio('/audio/vizier.mp3');
+    }
+    void vizierAudioRef.current.play().catch(() => {});
     toast({ title: 'Vizier revealed!', description: 'Choose who you think is the Chor!' });
   };
 
@@ -142,6 +157,36 @@ const GameRoom: React.FC = () => {
     currentPlayer?.privateRole === 'vizier';
 
   const unrevealed = players.filter(p => !p.revealed && p.uid !== currentPlayer?.uid);
+  const shouldForceShowHeader = canRevealBadshah || canRevealVizier || (canGuess && selectedTarget) || (isHost && ((room?.stage === 'waiting' && players.length === 4) || room?.stage === 'scoring'));
+
+  useEffect(() => {
+    if (shouldForceShowHeader && headerCollapsed) {
+      setHeaderCollapsed(false);
+    }
+  }, [shouldForceShowHeader, headerCollapsed]);
+
+  useEffect(() => {
+    if (!room?.timerEndsAt) {
+      setTimerText(null);
+      return;
+    }
+    const update = () => {
+      const diff = room.timerEndsAt - Date.now();
+      if (diff <= 0) {
+        setTimerText('00:00');
+        return;
+      }
+      const secs = Math.floor(diff / 1000);
+      const m = Math.floor(secs / 60)
+        .toString()
+        .padStart(2, '0');
+      const s = (secs % 60).toString().padStart(2, '0');
+      setTimerText(`${m}:${s}`);
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [room?.timerEndsAt]);
 
   if (loading) {
     return (
@@ -166,13 +211,18 @@ const GameRoom: React.FC = () => {
   return (
     <div className="min-h-screen gradient-sunny flex flex-col overflow-hidden">
       {/* Top Controls */}
-      <header className="sticky top-0 z-40 bg-card/80 backdrop-blur-md border-b border-border/50 shadow-soft">
-        <div className="flex flex-col gap-2 p-3 md:p-4">
-        <div className="flex flex-wrap items-center gap-2 md:gap-3">
+      <header
+        className={`sticky top-0 z-40 border-b border-border/30 ${headerCollapsed ? 'bg-transparent' : 'bg-card/80 backdrop-blur-md shadow-soft'}`}
+        style={{ paddingBottom: '22px' }}
+      >
+        <div className={`transition-[max-height,opacity] duration-300 overflow-hidden ${headerCollapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[520px] opacity-100'}`}>
+          <div className="flex flex-col gap-2 p-3 md:p-4">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
             {/* Left: Back + Room code */}
             <div className="flex items-center gap-2 flex-1 min-w-[220px] sm:min-w-[260px]">
-              <Button variant="ghost" size="icon" onClick={handleLeave} className="shrink-0">
-                <ArrowLeft className="w-5 h-5" />
+              <Button variant="outline" size="sm" onClick={handleLeave} className="inline-flex items-center gap-2">
+                <ArrowLeft className="w-4 h-4" />
+                Leave
               </Button>
               <button
                 onClick={handleCopyCode}
@@ -192,10 +242,11 @@ const GameRoom: React.FC = () => {
               <Badge variant="secondary" className="px-3 py-1 w-full sm:w-auto justify-center">
                 <Timer className="w-3 h-3 mr-1" />
                 {STAGE_LABELS[room.stage]}
+                {timerText ? ` · ${timerText}` : ''}
               </Badge>
             </div>
 
-            {/* Right: Player count + Round */}
+            {/* Right: Player count + Round + Toggle */}
             <div className="flex items-center gap-2 flex-1 justify-end min-w-[170px]">
               <Badge variant="outline" className="gap-1 shrink-0">
                 <Users className="w-3 h-3" />
@@ -205,79 +256,94 @@ const GameRoom: React.FC = () => {
             </div>
           </div>
 
-          {/* Host controls */}
-          {isHost && (
-            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
-              <Button
-                size="sm"
-                onClick={handleDeal}
-                disabled={players.length !== 4 || room.stage !== 'waiting'}
-                className="whitespace-nowrap"
-              >
-                <Play className="w-4 h-4 mr-1" />
-                Deal
-              </Button>
-              {room.stage === 'scoring' && (
-                <Button size="sm" variant="secondary" onClick={handleNextRound}>
-                  <RotateCcw className="w-4 h-4 mr-1" />
-                  Next Round
-                </Button>
+          
+              {/* Host controls */}
+              {isHost && (
+                <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
+                  <Button
+                    size="sm"
+                    onClick={handleStart}
+                    disabled={players.length !== 4 || room.stage !== 'waiting'}
+                    className="whitespace-nowrap"
+                  >
+                    <Play className="w-4 h-4 mr-1" />
+                    Start
+                  </Button>
+                  {room.stage === 'scoring' && (
+                    <Button size="sm" variant="secondary" onClick={handleNextRound}>
+                      <RotateCcw className="w-4 h-4 mr-1" />
+                      Next Round
+                    </Button>
+                  )}
+                </div>
               )}
-            </div>
-          )}
 
-          {/* Player action controls */}
-          {!isHost && (
-            <div className="flex items-center gap-2 overflow-x-auto">
-              {canRevealBadshah && (
-                <Button size="sm" onClick={handleRevealBadshah}>
-                  <Crown className="w-4 h-4 mr-1" />
-                  I am the Badshah!
-                </Button>
+              {/* Player action controls */}
+              {!isHost && (
+                <div className="flex items-center gap-2 overflow-x-auto">
+                  {canRevealBadshah && (
+                    <Button size="sm" onClick={handleRevealBadshah}>
+                      <Crown className="w-4 h-4 mr-1" />
+                      I am the Badshah!
+                    </Button>
+                  )}
+                  {canRevealVizier && (
+                    <Button size="sm" variant="secondary" onClick={handleRevealVizier}>
+                      <Eye className="w-4 h-4 mr-1" />
+                      I am the Vizier!
+                    </Button>
+                  )}
+                  {canGuess && selectedTarget && (
+                    <Button size="sm" variant="accent" onClick={handleMakeGuess}>
+                      <Target className="w-4 h-4 mr-1" />
+                      Confirm Guess
+                    </Button>
+                  )}
+                </div>
               )}
-              {canRevealVizier && (
-                <Button size="sm" variant="secondary" onClick={handleRevealVizier}>
-                  <Eye className="w-4 h-4 mr-1" />
-                  I am the Vizier!
-                </Button>
-              )}
-              {canGuess && selectedTarget && (
-                <Button size="sm" variant="accent" onClick={handleMakeGuess}>
-                  <Target className="w-4 h-4 mr-1" />
-                  Confirm Guess
-                </Button>
-              )}
-            </div>
-          )}
 
-          {/* Current player can also reveal if they're Badshah/Vizier */}
-          {isHost && (canRevealBadshah || canRevealVizier) && (
-            <div className="flex items-center gap-2 overflow-x-auto border-t border-border/50 pt-2">
-              {canRevealBadshah && (
-                <Button size="sm" onClick={handleRevealBadshah}>
-                  <Crown className="w-4 h-4 mr-1" />
-                  I am the Badshah!
-                </Button>
+              {/* Current player can also reveal if they're Badshah/Vizier */}
+              {isHost && (canRevealBadshah || canRevealVizier) && (
+                <div className="flex items-center gap-2 overflow-x-auto border-t border-border/50 pt-2">
+                  {canRevealBadshah && (
+                    <Button size="sm" onClick={handleRevealBadshah}>
+                      <Crown className="w-4 h-4 mr-1" />
+                      I am the Badshah!
+                    </Button>
+                  )}
+                  {canRevealVizier && (
+                    <Button size="sm" variant="secondary" onClick={handleRevealVizier}>
+                      <Eye className="w-4 h-4 mr-1" />
+                      I am the Vizier!
+                    </Button>
+                  )}
+                  {canGuess && selectedTarget && (
+                    <Button size="sm" variant="accent" onClick={handleMakeGuess}>
+                      <Target className="w-4 h-4 mr-1" />
+                      Confirm Guess
+                    </Button>
+                  )}
+                </div>
               )}
-              {canRevealVizier && (
-                <Button size="sm" variant="secondary" onClick={handleRevealVizier}>
-                  <Eye className="w-4 h-4 mr-1" />
-                  I am the Vizier!
-                </Button>
-              )}
-              {canGuess && selectedTarget && (
-                <Button size="sm" variant="accent" onClick={handleMakeGuess}>
-                  <Target className="w-4 h-4 mr-1" />
-                  Confirm Guess
-                </Button>
-              )}
-            </div>
-          )}
+          
+        </div>
+        </div>
+        <div className="flex justify-center absolute left-1/2 -translate-x-1/2 bottom-2" style={{bottom:'-16px'}}>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="rounded-full shadow-md px-3 py-1 text-xs"
+            onClick={() => setHeaderCollapsed((v) => !v)}
+            aria-label={headerCollapsed ? "" : ""}
+          >
+            {headerCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            {headerCollapsed ? "" : ""}
+          </Button>
         </div>
       </header>
 
       {/* 2x2 Grid always on screen */}
-      <main className="flex-1 p-3 md:p-6 overflow-auto">
+      <main className="flex-1 p-3 md:p-6 overflow-auto pb-16">
         <div className="h-full min-h-0 max-w-5xl mx-auto grid grid-cols-2 grid-rows-2 gap-2 md:gap-3 auto-rows-auto place-items-center">
           {players.map((player) => (
             <PlayerTile
@@ -290,6 +356,7 @@ const GameRoom: React.FC = () => {
               onToggleVideo={player.uid === selfId ? toggleVideo : undefined}
               isAudioEnabled={player.uid === selfId ? isAudioEnabled : undefined}
               isVideoEnabled={player.uid === selfId ? isVideoEnabled : undefined}
+              timerText={timerText}
               canSelect={canGuess && !player.revealed && player.uid !== user?.uid}
               isSelected={selectedTarget === player.uid}
               onSelect={() => setSelectedTarget(player.uid)}
@@ -299,7 +366,7 @@ const GameRoom: React.FC = () => {
           {Array.from({ length: Math.max(0, 4 - players.length) }).map((_, i) => (
             <div
               key={`empty-${i}`}
-              className="relative w-full max-w-[320px] sm:max-w-[340px] md:max-w-[360px] aspect-square rounded-2xl border-2 border-dashed border-border/50 flex items-center justify-center bg-muted/20 shadow-card"
+              className="relative w-full max-w-[360px] sm:max-w-[380px] md:max-w-[420px] aspect-[2/3] md:aspect-[3/2] rounded-2xl border-2 border-dashed border-border/50 flex items-center justify-center bg-muted/20 shadow-card"
             >
               <div className="text-center text-muted-foreground">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
