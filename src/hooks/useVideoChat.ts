@@ -174,7 +174,11 @@ export const useVideoChat = (
 
       // Default to same host /signal via ws or wss to avoid hardcoded localhost in production
       const fallbackHost = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/signal`;
-      const url = (import.meta.env.VITE_SIGNALING_URL || fallbackHost).trim();
+      let url = (import.meta.env.VITE_SIGNALING_URL || fallbackHost).trim();
+      if (location.protocol === "https:" && url.startsWith("ws://")) {
+        // Auto-upgrade to wss when served over https to avoid mixed-content blocking
+        url = url.replace(/^ws:\/\//, "wss://");
+      }
 
       console.log("[useVideoChat] connecting to", url);
       socketRef.current = new WebSocket(url);
