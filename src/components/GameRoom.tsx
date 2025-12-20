@@ -54,6 +54,7 @@ const GameRoom: React.FC = () => {
     stopRoundForLeave,
     joinRoom,
     fillBotsToCapacity,
+    addBotToRoom,
   } = useRoom(roomId || null);
 
   const [copied, setCopied] = useState(false);
@@ -223,12 +224,8 @@ const GameRoom: React.FC = () => {
   const handleAddBots = async () => {
     if (!roomId) return;
     try {
-      const added = await fillBotsToCapacity(roomId);
-      if (added > 0) {
-        toast({ title: 'Bots added', description: `Filled ${added} bot${added > 1 ? 's' : ''} to start the game.` });
-      } else {
-        toast({ title: 'Room already full' });
-      }
+      await addBotToRoom(roomId);
+      toast({ title: 'Bot added', description: 'Added one bot to the room.' });
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message || 'Could not add bots.', variant: 'destructive' });
     }

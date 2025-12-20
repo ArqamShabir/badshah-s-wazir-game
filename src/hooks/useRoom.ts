@@ -174,24 +174,41 @@ export const useRoom = (roomId: string | null) => {
     const playersRef = ref(db, `rooms/${code}/players`);
     const playersSnap = await get(playersRef);
     const currentPlayers = playersSnap.exists() ? playersSnap.val() : {};
-    let playerIds = Object.keys(currentPlayers);
-    if (playerIds.length >= 4) {
-      // Prefer to remove a bot to make space
-      const botId = playerIds.find(id => currentPlayers[id]?.isBot);
-      if (botId) {
-        await remove(ref(db, `rooms/${code}/players/${botId}`));
-        playerIds = playerIds.filter(id => id !== botId);
-      }
+    const playerIds = Object.keys(currentPlayers);
+    const now = Date.now();
+    const staleIds = playerIds.filter((id) => {
+      const player = currentPlayers[id];
+      return player?.lastSeen && now - player.lastSeen > STALE_PLAYER_MS;
+    });
+
+    if (staleIds.length) {
+      const updates: Record<string, null> = {};
+      staleIds.forEach((id) => {
+        updates[id] = null;
+      });
+      await update(playersRef, updates);
     }
-    if (playerIds.length >= 4) {
-      throw new Error('Room is full');
+
+    const remainingPlayers = playerIds.filter((id) => !staleIds.includes(id));
+    const remainingHumans = remainingPlayers.filter((id) => !currentPlayers[id]?.isBot);
+    const hasBots = remainingPlayers.some((id) => currentPlayers[id]?.isBot);
+
+    if (remainingPlayers.length === 0 || remainingHumans.length === 0) {
+      await remove(ref(db, `rooms/${code}`));
+      throw new Error('Room is closed');
     }
 
     // Check if already in room
     const playerRef = ref(db, `rooms/${code}/players/${user.uid}`);
     const playerSnap = await get(playerRef);
-    
+
     if (!playerSnap.exists()) {
+      if (hasBots) {
+        throw new Error('Room is vs bots');
+      }
+      if (remainingPlayers.length >= 4) {
+        throw new Error('Room is full');
+      }
       await set(playerRef, {
         displayName: user.displayName || 'Player',
         avatar: user.photoURL || '',
@@ -225,17 +242,21 @@ export const useRoom = (roomId: string | null) => {
     await onDisconnect(playerRef).cancel();
     await remove(playerRef);
 
-    // If host leaves and there are other players, assign new host
-    if (room?.hostId === user.uid && players.length > 1) {
-      const newHost = players.find(p => p.uid !== user.uid);
+    const remainingPlayers = players.filter(p => p.uid !== user.uid);
+    const remainingHumans = remainingPlayers.filter(p => !p.isBot);
+
+    // If no humans left, delete room (even if bots remain)
+    if (remainingHumans.length === 0) {
+      await remove(ref(db, `rooms/${roomId}`));
+      return;
+    }
+
+    // If host leaves, assign a human host if possible
+    if (room?.hostId === user.uid) {
+      const newHost = remainingHumans[0];
       if (newHost) {
         await update(ref(db, `rooms/${roomId}`), { hostId: newHost.uid });
       }
-    }
-
-    // If no players left, delete room
-    if (players.length <= 1) {
-      await remove(ref(db, `rooms/${roomId}`));
     }
   }, [user, roomId, room, players]);
 
@@ -527,6 +548,20 @@ export const useRoom = (roomId: string | null) => {
     const id = setInterval(checkAndRun, 500);
     return () => clearInterval(id);
   }, [user, room?.hostId, room?.timerEndsAt, room?.stage, roomId, players, forceGuessAndScore]);
+
+  // Clean up rooms when the last human disconnects (covers abrupt closes)
+  useEffect(() => {
+    if (!user || !roomId) return;
+    const roomRef = ref(db, `rooms/${roomId}`);
+    const humans = players.filter(player => !player.isBot);
+    const isOnlyHuman = humans.length === 1 && humans[0].uid === user.uid;
+
+    if (isOnlyHuman) {
+      void onDisconnect(roomRef).remove();
+    } else {
+      void onDisconnect(roomRef).cancel();
+    }
+  }, [user, roomId, players]);
 
   const currentPlayer = user ? players.find(p => p.uid === user.uid) : null;
   const isHost = user?.uid === room?.hostId;
