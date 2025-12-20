@@ -440,6 +440,24 @@ export const useRoom = (roomId: string | null) => {
     await update(ref(db, `rooms/${roomId}`), updates);
   }, [user, roomId, room, players]);
 
+  const stopRoundForLeave = useCallback(async () => {
+    if (!user || !roomId || room?.hostId !== user.uid) return;
+
+    const updates: Record<string, any> = {
+      stage: 'waiting',
+      guessTarget: null,
+      timerEndsAt: null,
+    };
+
+    players.forEach(player => {
+      updates[`players/${player.uid}/privateRole`] = null;
+      updates[`players/${player.uid}/publicRole`] = null;
+      updates[`players/${player.uid}/revealed`] = false;
+    });
+
+    await update(ref(db, `rooms/${roomId}`), updates);
+  }, [user, roomId, room, players]);
+
   // reset timeout tracker when stage/timer changes
   useEffect(() => {
     timerGateRef.current = null;
@@ -528,6 +546,7 @@ export const useRoom = (roomId: string | null) => {
     revealVizier,
     makeGuess,
     resetRound,
+    stopRoundForLeave,
     addBotToRoom,
     fillBotsToCapacity,
   };

@@ -51,6 +51,7 @@ const GameRoom: React.FC = () => {
     revealVizier,
     makeGuess,
     resetRound,
+    stopRoundForLeave,
     joinRoom,
     fillBotsToCapacity,
   } = useRoom(roomId || null);
@@ -349,11 +350,14 @@ const GameRoom: React.FC = () => {
       }
       leaveTimerRef.current = setTimeout(() => {
         if (lastPlayerCountRef.current !== null && lastPlayerCountRef.current < 4 && room.stage !== 'waiting') {
+          if (isHost) {
+            void stopRoundForLeave();
+          }
           setShowLeaveModal(true);
         }
       }, 10_000);
     }
-  }, [players.length, room?.stage, showLeaveModal]);
+  }, [players.length, room?.stage, showLeaveModal, isHost, stopRoundForLeave]);
 
   useEffect(() => {
     if (room?.stage) {
