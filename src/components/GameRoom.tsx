@@ -18,8 +18,6 @@ import {
   ArrowLeft,
   Users,
   Timer,
-  ChevronDown,
-  ChevronUp,
   XCircle
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -60,15 +58,10 @@ const GameRoom: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [timerText, setTimerText] = useState<string | null>(null);
-  const [headerCollapsed, setHeaderCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.innerWidth < 640;
-  });
   const [showOutcome, setShowOutcome] = useState(false);
   const [bannerText, setBannerText] = useState<string | null>(null);
   const [bannerTone, setBannerTone] = useState<'neutral' | 'accent'>('neutral');
   const [headerHeight, setHeaderHeight] = useState(0);
-  const [bannerHeight, setBannerHeight] = useState(0);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
 
   const selfId = currentPlayer?.uid || user?.uid;
@@ -83,7 +76,7 @@ const GameRoom: React.FC = () => {
   const lastStageRef = useRef<GameStage | null>(null);
   const lastGuessTargetRef = useRef<string | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
-  const bannerRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef({ width: 0, height: 0 });
 
   // Ensure the current user is present in the room even when navigating via shared links
   const joinInFlightRef = useRef(false);
@@ -109,48 +102,56 @@ const GameRoom: React.FC = () => {
 
   useEffect(() => {
     const headerEl = headerRef.current;
-    if (!headerEl || typeof ResizeObserver === 'undefined') return;
-
-    const update = () => {
-      setHeaderHeight(Math.ceil(headerEl.getBoundingClientRect().height));
-    };
-    update();
-
-    const observer = new ResizeObserver(update);
-    observer.observe(headerEl);
-    return () => observer.disconnect();
+    if (!headerEl) return;
+    setHeaderHeight(Math.ceil(headerEl.getBoundingClientRect().height));
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const update = () => {
-      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    const getSize = () => ({
+      width: window.innerWidth,
+      height: window.visualViewport?.height ?? window.innerHeight,
+    });
+
+    const apply = () => {
+      const next = getSize();
+      const prev = viewportRef.current;
+      if (!prev.width) {
+        viewportRef.current = next;
+        setViewportSize(next);
+        return;
+      }
+      const widthDelta = Math.abs(next.width - prev.width);
+      const heightDelta = Math.abs(next.height - prev.height);
+      if (widthDelta >= 20 || heightDelta >= 80) {
+        viewportRef.current = next;
+        setViewportSize(next);
+      }
     };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+
+    let rafId: number | null = null;
+    const onResize = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      rafId = requestAnimationFrame(() => {
+        apply();
+        rafId = null;
+      });
+    };
+
+    apply();
+    window.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('resize', onResize);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, []);
 
-  useEffect(() => {
-    const bannerEl = bannerRef.current;
-    if (!bannerEl || typeof ResizeObserver === 'undefined') {
-      setBannerHeight(0);
-      return;
-    }
-
-    const update = () => {
-      setBannerHeight(Math.ceil(bannerEl.getBoundingClientRect().height));
-    };
-    update();
-
-    const observer = new ResizeObserver(update);
-    observer.observe(bannerEl);
-    return () => observer.disconnect();
-  }, [bannerText]);
-
-  const bannerOffset = bannerText ? bannerHeight + 12 : 0;
   const mainHeightPx = viewportSize.height
-    ? Math.max(0, viewportSize.height - headerHeight - bannerOffset)
+    ? Math.max(0, viewportSize.height - headerHeight)
     : 0;
   const mainHeight = mainHeightPx
     ? `${mainHeightPx}px`
@@ -441,14 +442,9 @@ const GameRoom: React.FC = () => {
       {/* Top Controls */}
       <header
         ref={headerRef}
-        className={`sticky top-0 z-40 border-b border-border/30 ${
-          headerCollapsed
-            ? 'bg-transparent pb-3'
-            : 'bg-card/80 backdrop-blur-md shadow-soft'
-        }`}
+        className="sticky top-0 z-40 border-b border-border/30 bg-card/80 backdrop-blur-md shadow-soft pb-4 sm:pb-6"
       >
-        <div className={`transition-[max-height,opacity] duration-300 overflow-hidden ${headerCollapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[520px] opacity-100'}`}>
-          <div className="flex flex-col gap-2 p-3 md:p-4">
+        <div className="flex flex-col gap-2 p-3 md:p-4">
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 md:gap-3">
             {/* Left: Back + Room code */}
             <div className="flex items-center gap-2 flex-1 min-w-0 sm:min-w-[260px]">
@@ -486,25 +482,11 @@ const GameRoom: React.FC = () => {
               <Badge variant="outline" className="shrink-0">R{room.round}</Badge>
             </div>
           </div>
-
-          
-        </div>
-        </div>
-        <div className="flex justify-center pt-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            className="rounded-full shadow-md px-3 py-1 text-xs"
-            onClick={() => setHeaderCollapsed((v) => !v)}
-            aria-label={headerCollapsed ? "Expand header" : "Collapse header"}
-          >
-            {headerCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-          </Button>
         </div>
       </header>
 
       {bannerText && (
-        <div ref={bannerRef} className="fixed top-16 sm:top-24 left-1/2 -translate-x-1/2 z-40 px-3 pointer-events-none">
+        <div className="fixed top-16 sm:top-24 left-1/2 -translate-x-1/2 z-40 px-3 pointer-events-none">
           <div
             className={`w-[80vw] max-w-[80vw] sm:w-auto sm:max-w-[420px] text-center rounded-2xl px-4 py-2.5 text-xs sm:text-sm font-semibold shadow-soft border border-border/50 backdrop-blur ${
               bannerTone === 'accent'
@@ -607,7 +589,20 @@ const GameRoom: React.FC = () => {
                 <span className="font-semibold">{chorPlayer ? chorPlayer.displayName : 'TBD'}</span>
               </div>
             </div>
-            <Button onClick={() => setShowOutcome(false)}>Close</Button>
+            <div className="flex items-center justify-center gap-2">
+              {isHost && room.stage === 'scoring' && (
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    await handleNextRound();
+                    setShowOutcome(false);
+                  }}
+                >
+                  Next Round
+                </Button>
+              )}
+              <Button onClick={() => setShowOutcome(false)}>Close</Button>
+            </div>
           </div>
         </div>
       )}
