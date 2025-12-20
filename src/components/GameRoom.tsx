@@ -60,10 +60,16 @@ const GameRoom: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [timerText, setTimerText] = useState<string | null>(null);
-  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 640;
+  });
   const [showOutcome, setShowOutcome] = useState(false);
   const [bannerText, setBannerText] = useState<string | null>(null);
   const [bannerTone, setBannerTone] = useState<'neutral' | 'accent'>('neutral');
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [bannerHeight, setBannerHeight] = useState(0);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
 
   const selfId = currentPlayer?.uid || user?.uid;
   const { streams, error: videoError, toggleAudio, toggleVideo, isAudioEnabled, isVideoEnabled } = useVideoChat(
@@ -76,6 +82,8 @@ const GameRoom: React.FC = () => {
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastStageRef = useRef<GameStage | null>(null);
   const lastGuessTargetRef = useRef<string | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const bannerRef = useRef<HTMLDivElement | null>(null);
 
   // Ensure the current user is present in the room even when navigating via shared links
   const joinInFlightRef = useRef(false);
@@ -98,6 +106,63 @@ const GameRoom: React.FC = () => {
       joinInFlightRef.current = false;
     });
   }, [roomId, user, players, joinRoom, toast]);
+
+  useEffect(() => {
+    const headerEl = headerRef.current;
+    if (!headerEl || typeof ResizeObserver === 'undefined') return;
+
+    const update = () => {
+      setHeaderHeight(Math.ceil(headerEl.getBoundingClientRect().height));
+    };
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(headerEl);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const update = () => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  useEffect(() => {
+    const bannerEl = bannerRef.current;
+    if (!bannerEl || typeof ResizeObserver === 'undefined') {
+      setBannerHeight(0);
+      return;
+    }
+
+    const update = () => {
+      setBannerHeight(Math.ceil(bannerEl.getBoundingClientRect().height));
+    };
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(bannerEl);
+    return () => observer.disconnect();
+  }, [bannerText]);
+
+  const bannerOffset = bannerText ? bannerHeight + 12 : 0;
+  const mainHeightPx = viewportSize.height
+    ? Math.max(0, viewportSize.height - headerHeight - bannerOffset)
+    : 0;
+  const mainHeight = mainHeightPx
+    ? `${mainHeightPx}px`
+    : 'calc(100vh - 72px)';
+  const isMobile = viewportSize.width > 0 && viewportSize.width < 640;
+  const gridPaddingPx = isMobile ? 16 : 0;
+  const gridGapPx = isMobile ? 8 : 12;
+  const gridHeightPx = isMobile ? Math.max(0, mainHeightPx - gridPaddingPx) : 0;
+  const rowHeightPx = isMobile && gridHeightPx
+    ? Math.max(0, Math.floor((gridHeightPx - gridGapPx) / 2))
+    : 0;
+  const tileMinHeight = isMobile && rowHeightPx ? rowHeightPx : undefined;
 
   const handleCopyCode = () => {
     if (roomId) {
@@ -294,6 +359,7 @@ const GameRoom: React.FC = () => {
         icon: <Crown className="w-4 h-4" />,
         onClick: handleRevealBadshah,
         variant: 'default' as const,
+        className: undefined,
         disabled: false,
       };
     }
@@ -303,6 +369,7 @@ const GameRoom: React.FC = () => {
         icon: <Eye className="w-4 h-4" />,
         onClick: handleRevealVizier,
         variant: 'secondary' as const,
+        className: undefined,
         disabled: false,
       };
     }
@@ -312,6 +379,7 @@ const GameRoom: React.FC = () => {
         icon: <Target className="w-4 h-4" />,
         onClick: handleMakeGuess,
         variant: 'accent' as const,
+        className: undefined,
         disabled: !selectedTarget,
       };
     }
@@ -321,6 +389,7 @@ const GameRoom: React.FC = () => {
         icon: <RotateCcw className="w-4 h-4" />,
         onClick: handleNextRound,
         variant: 'secondary' as const,
+        className: undefined,
         disabled: false,
       };
     }
@@ -330,6 +399,7 @@ const GameRoom: React.FC = () => {
         icon: <Play className="w-4 h-4" />,
         onClick: handleStart,
         variant: 'default' as const,
+        className: undefined,
         disabled: false,
       };
     }
@@ -338,7 +408,8 @@ const GameRoom: React.FC = () => {
         label: 'Add Bot',
         icon: <Users className="w-4 h-4" />,
         onClick: handleAddBots,
-        variant: 'ghost' as const,
+        variant: 'glass' as const,
+        className: 'bg-white text-foreground border-border/60 hover:bg-white/90 sm:bg-card/80',
         disabled: false,
       };
     }
@@ -369,14 +440,18 @@ const GameRoom: React.FC = () => {
     <div className="min-h-screen gradient-sunny flex flex-col overflow-hidden">
       {/* Top Controls */}
       <header
-        className={`sticky top-0 z-40 border-b border-border/30 ${headerCollapsed ? 'bg-transparent' : 'bg-card/80 backdrop-blur-md shadow-soft'}`}
-        style={{ paddingBottom: '22px' }}
+        ref={headerRef}
+        className={`sticky top-0 z-40 border-b border-border/30 ${
+          headerCollapsed
+            ? 'bg-transparent pb-3'
+            : 'bg-card/80 backdrop-blur-md shadow-soft'
+        }`}
       >
         <div className={`transition-[max-height,opacity] duration-300 overflow-hidden ${headerCollapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[520px] opacity-100'}`}>
           <div className="flex flex-col gap-2 p-3 md:p-4">
-          <div className="flex flex-wrap items-center gap-2 md:gap-3">
+          <div className="flex flex-wrap items-center gap-1 sm:gap-2 md:gap-3">
             {/* Left: Back + Room code */}
-            <div className="flex items-center gap-2 flex-1 min-w-[220px] sm:min-w-[260px]">
+            <div className="flex items-center gap-2 flex-1 min-w-0 sm:min-w-[260px]">
               <Button variant="outline" size="sm" onClick={handleLeave} className="inline-flex items-center gap-2">
                 <ArrowLeft className="w-4 h-4" />
                 Leave
@@ -395,7 +470,7 @@ const GameRoom: React.FC = () => {
             </div>
 
             {/* Center: Status */}
-            <div className="flex justify-center flex-1 min-w-[180px]">
+            <div className="hidden sm:flex justify-center flex-1 min-w-[180px]">
               <Badge variant="secondary" className="px-3 py-1 w-full sm:w-auto justify-center">
                 <Timer className="w-3 h-3 mr-1" />
                 {STAGE_LABELS[room.stage]}
@@ -403,7 +478,7 @@ const GameRoom: React.FC = () => {
             </div>
 
             {/* Right: Player count + Round + Toggle */}
-            <div className="flex items-center gap-2 flex-1 justify-end min-w-[170px]">
+            <div className="flex items-center gap-2 flex-1 justify-end min-w-0 sm:min-w-[170px]">
               <Badge variant="outline" className="gap-1 shrink-0">
                 <Users className="w-3 h-3" />
                 {players.length}/4
@@ -415,24 +490,23 @@ const GameRoom: React.FC = () => {
           
         </div>
         </div>
-        <div className="flex justify-center absolute left-1/2 -translate-x-1/2 bottom-2" style={{bottom:'-16px'}}>
+        <div className="flex justify-center pt-2">
           <Button
             size="sm"
             variant="secondary"
             className="rounded-full shadow-md px-3 py-1 text-xs"
             onClick={() => setHeaderCollapsed((v) => !v)}
-            aria-label={headerCollapsed ? "" : ""}
+            aria-label={headerCollapsed ? "Expand header" : "Collapse header"}
           >
             {headerCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-            {headerCollapsed ? "" : ""}
           </Button>
         </div>
       </header>
 
       {bannerText && (
-        <div className="fixed top-16 sm:top-24 left-1/2 -translate-x-1/2 z-40 px-3 pointer-events-none">
+        <div ref={bannerRef} className="fixed top-16 sm:top-24 left-1/2 -translate-x-1/2 z-40 px-3 pointer-events-none">
           <div
-            className={`max-w-[92vw] text-center rounded-2xl px-4 py-2.5 text-xs sm:text-sm font-semibold shadow-soft border border-border/50 backdrop-blur ${
+            className={`w-[80vw] max-w-[80vw] sm:w-auto sm:max-w-[420px] text-center rounded-2xl px-4 py-2.5 text-xs sm:text-sm font-semibold shadow-soft border border-border/50 backdrop-blur ${
               bannerTone === 'accent'
                 ? 'bg-secondary text-secondary-foreground'
                 : 'bg-card/95 text-foreground'
@@ -444,8 +518,14 @@ const GameRoom: React.FC = () => {
       )}
 
       {/* 2x2 Grid always on screen */}
-      <main className="flex-1 p-3 md:p-6 overflow-auto pb-16">
-        <div className="h-full min-h-0 max-w-5xl mx-auto grid grid-cols-2 gap-2 sm:gap-3 auto-rows-auto place-items-center">
+      <main
+        className="flex-1 min-h-0 p-2 sm:p-3 md:p-6 overflow-hidden pb-2 sm:pb-16"
+        style={{ height: mainHeight }}
+      >
+        <div
+          className="h-full min-h-0 max-w-5xl mx-auto grid grid-cols-2 grid-rows-2 gap-2 sm:gap-3 auto-rows-fr place-items-stretch sm:place-items-center"
+          style={isMobile && gridHeightPx ? { height: `${gridHeightPx}px` } : undefined}
+        >
           {players.map((player) => {
             const isSelf = player.uid === selfId;
             const action = isSelf ? selfAction : null;
@@ -466,6 +546,8 @@ const GameRoom: React.FC = () => {
                 onAction={action?.onClick}
                 actionDisabled={action?.disabled}
                 actionVariant={action?.variant}
+                actionClassName={action?.className}
+                minHeight={tileMinHeight}
                 canSelect={canGuess && !player.revealed && player.uid !== user?.uid}
                 isSelected={selectedTarget === player.uid}
                 onSelect={() => setSelectedTarget(player.uid)}
@@ -476,7 +558,8 @@ const GameRoom: React.FC = () => {
           {Array.from({ length: Math.max(0, 4 - players.length) }).map((_, i) => (
             <div
               key={`empty-${i}`}
-              className="relative w-full max-w-[360px] sm:max-w-[380px] md:max-w-[420px] aspect-[4/5] md:aspect-[3/2] rounded-2xl border-2 border-dashed border-border/50 flex items-center justify-center bg-muted/20 shadow-card"
+              className="relative w-full h-full max-w-full sm:max-w-[380px] md:max-w-[420px] sm:h-auto sm:aspect-[2/3] md:aspect-[3/2] rounded-2xl border-2 border-dashed border-border/50 flex items-center justify-center bg-muted/20 shadow-card"
+              style={tileMinHeight ? { minHeight: tileMinHeight } : undefined}
             >
               <div className="text-center text-muted-foreground">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
