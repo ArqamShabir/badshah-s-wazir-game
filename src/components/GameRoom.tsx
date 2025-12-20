@@ -59,6 +59,7 @@ const GameRoom: React.FC = () => {
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [timerText, setTimerText] = useState<string | null>(null);
   const [showOutcome, setShowOutcome] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [bannerText, setBannerText] = useState<string | null>(null);
   const [bannerTone, setBannerTone] = useState<'neutral' | 'accent'>('neutral');
   const [headerHeight, setHeaderHeight] = useState(0);
@@ -77,7 +78,8 @@ const GameRoom: React.FC = () => {
   const lastGuessTargetRef = useRef<string | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const viewportRef = useRef({ width: 0, height: 0 });
-  const autoFillRef = useRef(false);
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPlayerCountRef = useRef<number | null>(null);
 
   // Ensure the current user is present in the room even when navigating via shared links
   const joinInFlightRef = useRef(false);
@@ -231,21 +233,6 @@ const GameRoom: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!roomId || !isHost || !room?.stage) return;
-    if (players.length >= 4) return;
-    if (room.stage !== 'waiting' && room.stage !== 'scoring') return;
-    if (autoFillRef.current) return;
-    autoFillRef.current = true;
-    void fillBotsToCapacity(roomId)
-      .catch((err: any) => {
-        console.warn('[GameRoom] auto-fill bots failed', err);
-      })
-      .finally(() => {
-        autoFillRef.current = false;
-      });
-  }, [roomId, isHost, room?.stage, players.length, fillBotsToCapacity]);
-
   const showBanner = useCallback((text: string, tone: 'neutral' | 'accent' = 'neutral') => {
     setBannerText(text);
     setBannerTone(tone);
@@ -308,6 +295,14 @@ const GameRoom: React.FC = () => {
   }, [room?.timerEndsAt]);
 
   useEffect(() => {
+    return () => {
+      if (leaveTimerRef.current) {
+        clearTimeout(leaveTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (room?.stage === 'final_reveal') {
       setShowOutcome(true);
     }
@@ -315,6 +310,50 @@ const GameRoom: React.FC = () => {
       setShowOutcome(false);
     }
   }, [room?.stage]);
+
+  useEffect(() => {
+    if (showLeaveModal) {
+      setShowOutcome(false);
+    }
+  }, [showLeaveModal]);
+
+  useEffect(() => {
+    if (!room?.stage) return;
+    if (!players.length) return;
+    const prevCount = lastPlayerCountRef.current;
+    lastPlayerCountRef.current = players.length;
+
+    if (players.length >= 4) {
+      if (leaveTimerRef.current) {
+        clearTimeout(leaveTimerRef.current);
+        leaveTimerRef.current = null;
+      }
+      if (showLeaveModal) {
+        setShowLeaveModal(false);
+      }
+      return;
+    }
+
+    if (room.stage === 'waiting') {
+      setShowLeaveModal(false);
+      if (leaveTimerRef.current) {
+        clearTimeout(leaveTimerRef.current);
+        leaveTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (prevCount !== null && players.length < prevCount) {
+      if (leaveTimerRef.current) {
+        clearTimeout(leaveTimerRef.current);
+      }
+      leaveTimerRef.current = setTimeout(() => {
+        if (lastPlayerCountRef.current !== null && lastPlayerCountRef.current < 4 && room.stage !== 'waiting') {
+          setShowLeaveModal(true);
+        }
+      }, 10_000);
+    }
+  }, [players.length, room?.stage, showLeaveModal]);
 
   useEffect(() => {
     if (room?.stage) {
@@ -614,6 +653,33 @@ const GameRoom: React.FC = () => {
                 </Button>
               )}
               <Button onClick={() => setShowOutcome(false)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Player left modal */}
+      {showLeaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-card rounded-2xl shadow-2xl p-6 w-full max-w-md text-center space-y-4 border border-border/50">
+            <div className="w-16 h-16 mx-auto rounded-full flex items-center justify-center bg-amber-100 text-amber-700">
+              <Users className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-bold">Player left the room</h3>
+            <p className="text-muted-foreground">
+              A player left during the game. Please create a new room to continue.
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  await leaveRoom();
+                  navigate('/');
+                }}
+              >
+                Create New Room
+              </Button>
+              <Button onClick={() => setShowLeaveModal(false)}>Close</Button>
             </div>
           </div>
         </div>
