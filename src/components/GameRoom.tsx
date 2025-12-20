@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRoom } from '@/hooks/useRoom';
@@ -19,7 +19,8 @@ import {
   Users,
   Timer,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  XCircle
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { GameStage } from '@/types/game';
@@ -53,12 +54,16 @@ const GameRoom: React.FC = () => {
     makeGuess,
     resetRound,
     joinRoom,
+    fillBotsToCapacity,
   } = useRoom(roomId || null);
 
   const [copied, setCopied] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [timerText, setTimerText] = useState<string | null>(null);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [bannerText, setBannerText] = useState<string | null>(null);
+  const [bannerTone, setBannerTone] = useState<'neutral' | 'accent'>('neutral');
 
   const selfId = currentPlayer?.uid || user?.uid;
   const { streams, error: videoError, toggleAudio, toggleVideo, isAudioEnabled, isVideoEnabled } = useVideoChat(
@@ -68,6 +73,9 @@ const GameRoom: React.FC = () => {
 
   const badshahAudioRef = useRef<HTMLAudioElement | null>(null);
   const vizierAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastStageRef = useRef<GameStage | null>(null);
+  const lastGuessTargetRef = useRef<string | null>(null);
 
   // Ensure the current user is present in the room even when navigating via shared links
   const joinInFlightRef = useRef(false);
@@ -142,6 +150,39 @@ const GameRoom: React.FC = () => {
     toast({ title: 'New round!', description: 'Ready to deal again.' });
   };
 
+  const handleAddBots = async () => {
+    if (!roomId) return;
+    try {
+      const added = await fillBotsToCapacity(roomId);
+      if (added > 0) {
+        toast({ title: 'Bots added', description: `Filled ${added} bot${added > 1 ? 's' : ''} to start the game.` });
+      } else {
+        toast({ title: 'Room already full' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message || 'Could not add bots.', variant: 'destructive' });
+    }
+  };
+
+  const showBanner = useCallback((text: string, tone: 'neutral' | 'accent' = 'neutral') => {
+    setBannerText(text);
+    setBannerTone(tone);
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+    }
+    bannerTimerRef.current = setTimeout(() => {
+      setBannerText(null);
+    }, 3200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
+
   const canRevealBadshah = 
     room?.stage === 'badshah_reveal' && 
     currentPlayer?.privateRole === 'badshah' &&
@@ -156,14 +197,10 @@ const GameRoom: React.FC = () => {
     room?.stage === 'vizier_guess' && 
     currentPlayer?.privateRole === 'vizier';
 
-  const unrevealed = players.filter(p => !p.revealed && p.uid !== currentPlayer?.uid);
-  const shouldForceShowHeader = canRevealBadshah || canRevealVizier || (canGuess && selectedTarget) || (isHost && ((room?.stage === 'waiting' && players.length === 4) || room?.stage === 'scoring'));
-
-  useEffect(() => {
-    if (shouldForceShowHeader && headerCollapsed) {
-      setHeaderCollapsed(false);
-    }
-  }, [shouldForceShowHeader, headerCollapsed]);
+  const vizierPlayer = players.find(p => p.publicRole === 'vizier' || p.privateRole === 'vizier');
+  const chorPlayer = players.find(p => p.publicRole === 'chor' || p.privateRole === 'chor');
+  const targetPlayer = room?.guessTarget ? players.find(p => p.uid === room.guessTarget) : null;
+  const vizierCorrect = targetPlayer?.privateRole === 'chor';
 
   useEffect(() => {
     if (!room?.timerEndsAt) {
@@ -187,6 +224,126 @@ const GameRoom: React.FC = () => {
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
   }, [room?.timerEndsAt]);
+
+  useEffect(() => {
+    if (room?.stage === 'final_reveal') {
+      setShowOutcome(true);
+    }
+    if (room?.stage === 'waiting') {
+      setShowOutcome(false);
+    }
+  }, [room?.stage]);
+
+  useEffect(() => {
+    if (!room?.stage) return;
+    if (room.stage === lastStageRef.current) return;
+    const isVizier = currentPlayer?.privateRole === 'vizier';
+    let nextBanner: string | null = null;
+    let tone: 'neutral' | 'accent' = 'neutral';
+
+    if (room.stage === 'badshah_reveal') {
+      nextBanner = 'Game started • Badshah reveal';
+    } else if (room.stage === 'vizier_reveal') {
+      nextBanner = 'Badshah revealed • Vizier reveal';
+    } else if (room.stage === 'vizier_guess') {
+      if (!currentPlayer?.privateRole) {
+        return;
+      }
+      nextBanner = isVizier ? 'Your turn • Pick the Chor and press Guess' : 'Vizier is guessing';
+      tone = 'accent';
+    } else if (room.stage === 'final_reveal') {
+      nextBanner = 'Guess locked • Revealing roles';
+    } else if (room.stage === 'scoring') {
+      nextBanner = 'Scores updated';
+    }
+
+    if (nextBanner) {
+      lastStageRef.current = room.stage;
+      showBanner(nextBanner, tone);
+    } else {
+      lastStageRef.current = room.stage;
+    }
+  }, [room?.stage, currentPlayer?.privateRole, showBanner]);
+
+  useEffect(() => {
+    if (!canGuess) {
+      lastGuessTargetRef.current = null;
+      return;
+    }
+    if (!selectedTarget) return;
+    if (lastGuessTargetRef.current === selectedTarget) return;
+    const targetName = players.find(p => p.uid === selectedTarget)?.displayName || 'player';
+    lastGuessTargetRef.current = selectedTarget;
+    showBanner(`Tap "Guess" to accuse ${targetName}`, 'accent');
+  }, [canGuess, selectedTarget, players, showBanner]);
+
+  // Auto-select a target when vizier needs to guess to reduce extra taps
+  useEffect(() => {
+    if (!canGuess) return;
+    if (selectedTarget) return;
+    const candidate = players.find(p => !p.revealed && p.uid !== selfId);
+    if (candidate) {
+      setSelectedTarget(candidate.uid);
+    }
+  }, [canGuess, selectedTarget, players, selfId]);
+
+  const selfAction = (() => {
+    if (canRevealBadshah) {
+      return {
+        label: 'Reveal',
+        icon: <Crown className="w-4 h-4" />,
+        onClick: handleRevealBadshah,
+        variant: 'default' as const,
+        disabled: false,
+      };
+    }
+    if (canRevealVizier) {
+      return {
+        label: 'Reveal',
+        icon: <Eye className="w-4 h-4" />,
+        onClick: handleRevealVizier,
+        variant: 'secondary' as const,
+        disabled: false,
+      };
+    }
+    if (canGuess) {
+      return {
+        label: 'Guess',
+        icon: <Target className="w-4 h-4" />,
+        onClick: handleMakeGuess,
+        variant: 'accent' as const,
+        disabled: !selectedTarget,
+      };
+    }
+    if (isHost && room?.stage === 'scoring') {
+      return {
+        label: 'Next',
+        icon: <RotateCcw className="w-4 h-4" />,
+        onClick: handleNextRound,
+        variant: 'secondary' as const,
+        disabled: false,
+      };
+    }
+    if (isHost && room?.stage === 'waiting' && players.length === 4) {
+      return {
+        label: 'Start',
+        icon: <Play className="w-4 h-4" />,
+        onClick: handleStart,
+        variant: 'default' as const,
+        disabled: false,
+      };
+    }
+    if (isHost && room?.stage === 'waiting' && players.length < 4) {
+      return {
+        label: 'Add Bot',
+        icon: <Users className="w-4 h-4" />,
+        onClick: handleAddBots,
+        variant: 'ghost' as const,
+        disabled: false,
+      };
+    }
+    return null;
+  })();
 
   if (loading) {
     return (
@@ -242,7 +399,6 @@ const GameRoom: React.FC = () => {
               <Badge variant="secondary" className="px-3 py-1 w-full sm:w-auto justify-center">
                 <Timer className="w-3 h-3 mr-1" />
                 {STAGE_LABELS[room.stage]}
-                {timerText ? ` · ${timerText}` : ''}
               </Badge>
             </div>
 
@@ -256,75 +412,6 @@ const GameRoom: React.FC = () => {
             </div>
           </div>
 
-          
-              {/* Host controls */}
-              {isHost && (
-                <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
-                  <Button
-                    size="sm"
-                    onClick={handleStart}
-                    disabled={players.length !== 4 || room.stage !== 'waiting'}
-                    className="whitespace-nowrap"
-                  >
-                    <Play className="w-4 h-4 mr-1" />
-                    Start
-                  </Button>
-                  {room.stage === 'scoring' && (
-                    <Button size="sm" variant="secondary" onClick={handleNextRound}>
-                      <RotateCcw className="w-4 h-4 mr-1" />
-                      Next Round
-                    </Button>
-                  )}
-                </div>
-              )}
-
-              {/* Player action controls */}
-              {!isHost && (
-                <div className="flex items-center gap-2 overflow-x-auto">
-                  {canRevealBadshah && (
-                    <Button size="sm" onClick={handleRevealBadshah}>
-                      <Crown className="w-4 h-4 mr-1" />
-                      I am the Badshah!
-                    </Button>
-                  )}
-                  {canRevealVizier && (
-                    <Button size="sm" variant="secondary" onClick={handleRevealVizier}>
-                      <Eye className="w-4 h-4 mr-1" />
-                      I am the Vizier!
-                    </Button>
-                  )}
-                  {canGuess && selectedTarget && (
-                    <Button size="sm" variant="accent" onClick={handleMakeGuess}>
-                      <Target className="w-4 h-4 mr-1" />
-                      Confirm Guess
-                    </Button>
-                  )}
-                </div>
-              )}
-
-              {/* Current player can also reveal if they're Badshah/Vizier */}
-              {isHost && (canRevealBadshah || canRevealVizier) && (
-                <div className="flex items-center gap-2 overflow-x-auto border-t border-border/50 pt-2">
-                  {canRevealBadshah && (
-                    <Button size="sm" onClick={handleRevealBadshah}>
-                      <Crown className="w-4 h-4 mr-1" />
-                      I am the Badshah!
-                    </Button>
-                  )}
-                  {canRevealVizier && (
-                    <Button size="sm" variant="secondary" onClick={handleRevealVizier}>
-                      <Eye className="w-4 h-4 mr-1" />
-                      I am the Vizier!
-                    </Button>
-                  )}
-                  {canGuess && selectedTarget && (
-                    <Button size="sm" variant="accent" onClick={handleMakeGuess}>
-                      <Target className="w-4 h-4 mr-1" />
-                      Confirm Guess
-                    </Button>
-                  )}
-                </div>
-              )}
           
         </div>
         </div>
@@ -342,31 +429,54 @@ const GameRoom: React.FC = () => {
         </div>
       </header>
 
+      {bannerText && (
+        <div className="fixed top-16 sm:top-24 left-1/2 -translate-x-1/2 z-40 px-3 pointer-events-none">
+          <div
+            className={`max-w-[92vw] text-center rounded-2xl px-4 py-2.5 text-xs sm:text-sm font-semibold shadow-soft border border-border/50 backdrop-blur ${
+              bannerTone === 'accent'
+                ? 'bg-secondary text-secondary-foreground'
+                : 'bg-card/95 text-foreground'
+            }`}
+          >
+            {bannerText}
+          </div>
+        </div>
+      )}
+
       {/* 2x2 Grid always on screen */}
       <main className="flex-1 p-3 md:p-6 overflow-auto pb-16">
-        <div className="h-full min-h-0 max-w-5xl mx-auto grid grid-cols-2 grid-rows-2 gap-2 md:gap-3 auto-rows-auto place-items-center">
-          {players.map((player) => (
-            <PlayerTile
-              key={player.uid}
-              player={player}
-              isCurrentUser={player.uid === selfId}
-              showPrivateRole={player.uid === selfId}
-              mediaStream={streams[player.uid]}
-              onToggleAudio={player.uid === selfId ? toggleAudio : undefined}
-              onToggleVideo={player.uid === selfId ? toggleVideo : undefined}
-              isAudioEnabled={player.uid === selfId ? isAudioEnabled : undefined}
-              isVideoEnabled={player.uid === selfId ? isVideoEnabled : undefined}
-              timerText={timerText}
-              canSelect={canGuess && !player.revealed && player.uid !== user?.uid}
-              isSelected={selectedTarget === player.uid}
-              onSelect={() => setSelectedTarget(player.uid)}
-            />
-          ))}
+        <div className="h-full min-h-0 max-w-5xl mx-auto grid grid-cols-2 gap-2 sm:gap-3 auto-rows-auto place-items-center">
+          {players.map((player) => {
+            const isSelf = player.uid === selfId;
+            const action = isSelf ? selfAction : null;
+            return (
+              <PlayerTile
+                key={player.uid}
+                player={player}
+                isCurrentUser={isSelf}
+                showPrivateRole={isSelf}
+                mediaStream={streams[player.uid]}
+                onToggleAudio={isSelf ? toggleAudio : undefined}
+                onToggleVideo={isSelf ? toggleVideo : undefined}
+                isAudioEnabled={isSelf ? isAudioEnabled : undefined}
+                isVideoEnabled={isSelf ? isVideoEnabled : undefined}
+                timerText={timerText}
+                actionLabel={action?.label}
+                actionIcon={action?.icon}
+                onAction={action?.onClick}
+                actionDisabled={action?.disabled}
+                actionVariant={action?.variant}
+                canSelect={canGuess && !player.revealed && player.uid !== user?.uid}
+                isSelected={selectedTarget === player.uid}
+                onSelect={() => setSelectedTarget(player.uid)}
+              />
+            );
+          })}
           {/* Empty slots */}
           {Array.from({ length: Math.max(0, 4 - players.length) }).map((_, i) => (
             <div
               key={`empty-${i}`}
-              className="relative w-full max-w-[360px] sm:max-w-[380px] md:max-w-[420px] aspect-[2/3] md:aspect-[3/2] rounded-2xl border-2 border-dashed border-border/50 flex items-center justify-center bg-muted/20 shadow-card"
+              className="relative w-full max-w-[360px] sm:max-w-[380px] md:max-w-[420px] aspect-[4/5] md:aspect-[3/2] rounded-2xl border-2 border-dashed border-border/50 flex items-center justify-center bg-muted/20 shadow-card"
             >
               <div className="text-center text-muted-foreground">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -382,21 +492,42 @@ const GameRoom: React.FC = () => {
         )}
       </main>
 
-      {/* Guess prompt */}
-      {canGuess && (
-        <div className="sticky bottom-20 left-0 right-0 px-4">
-          <div className="max-w-md mx-auto bg-secondary text-secondary-foreground rounded-xl p-4 shadow-lg text-center animate-slide-up">
-            <p className="font-semibold">
-              {selectedTarget 
-                ? `Tap "Confirm Guess" to accuse ${players.find(p => p.uid === selectedTarget)?.displayName}`
-                : 'Tap on a player to guess who the Chor is!'}
+      {/* Rules button */}
+      <RulesModal />
+
+      {/* Outcome modal */}
+      {showOutcome && (room.stage === 'final_reveal' || room.stage === 'scoring') && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-card rounded-2xl shadow-2xl p-6 w-full max-w-md text-center space-y-4 border border-border/50">
+            <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center ${vizierCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+              {vizierCorrect ? <Check className="w-8 h-8" /> : <XCircle className="w-8 h-8" />}
+            </div>
+            <h3 className="text-xl font-bold">
+              {vizierCorrect ? 'Vizier guessed right!' : 'Vizier guessed wrong'}
+            </h3>
+            <p className="text-muted-foreground">
+              {vizierPlayer
+                ? `${vizierPlayer.displayName || 'Vizier'} accused ${targetPlayer ? targetPlayer.displayName : 'no one'}. ${vizierCorrect ? 'Chor caught.' : 'Chor escaped.'}`
+                : 'Waiting for result...'}
             </p>
+            <div className="bg-muted/60 rounded-xl p-3 text-left border border-border/40">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-muted-foreground">Vizier</span>
+                <span className="font-semibold">{vizierPlayer?.displayName || 'TBD'}</span>
+              </div>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-muted-foreground">Guess</span>
+                <span className="font-semibold">{targetPlayer ? targetPlayer.displayName : 'No guess'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Actual Chor</span>
+                <span className="font-semibold">{chorPlayer ? chorPlayer.displayName : 'TBD'}</span>
+              </div>
+            </div>
+            <Button onClick={() => setShowOutcome(false)}>Close</Button>
           </div>
         </div>
       )}
-
-      {/* Rules button */}
-      <RulesModal />
     </div>
   );
 };

@@ -1,24 +1,43 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRoom } from '@/hooks/useRoom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Crown, Users, Plus, LogIn, LogOut, Copy, Check } from 'lucide-react';
+import { Crown, Users, Plus, LogIn, LogOut, Copy, Check, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const LobbyScreen: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { createRoom, joinRoom } = useRoom(null);
+  const { createRoom, joinRoom, fillBotsToCapacity } = useRoom(null);
   const { toast } = useToast();
   
   const [joinCode, setJoinCode] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [isCreatingWithBots, setIsCreatingWithBots] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [createdCode, setCreatedCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+
+  const displayName = useMemo(() => {
+    if (user?.displayName?.trim()) return user.displayName.trim();
+    if (user?.email?.trim()) return user.email.trim().split('@')[0];
+    return 'Player';
+  }, [user?.displayName, user?.email]);
+
+  const initials = displayName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [user?.photoURL]);
 
   const handleCreateRoom = async () => {
     setIsCreating(true);
@@ -37,6 +56,31 @@ const LobbyScreen: React.FC = () => {
       });
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleCreateRoomWithBots = async () => {
+    setIsCreatingWithBots(true);
+    try {
+      const roomCode = await createRoom();
+      setCreatedCode(roomCode);
+      toast({
+        title: 'Room Created!',
+        description: `Filling with bots...`,
+      });
+      await fillBotsToCapacity(roomCode);
+      toast({
+        title: 'Room ready vs bots',
+        description: `Share code: ${roomCode}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCreatingWithBots(false);
     }
   };
 
@@ -83,13 +127,20 @@ const LobbyScreen: React.FC = () => {
           <span className="font-bold text-lg text-foreground">Badshah ka Wazir</span>
         </div>
         <div className="flex items-center gap-3">
-          {user?.photoURL && (
-            <img 
-              src={user.photoURL} 
-              alt={user.displayName || 'User'} 
-              className="w-9 h-9 rounded-full border-2 border-primary shadow-soft"
-            />
-          )}
+          <div className="w-9 h-9 rounded-full border-2 border-primary shadow-soft overflow-hidden bg-card flex items-center justify-center">
+            {user?.photoURL && !avatarFailed ? (
+              <img 
+                src={user.photoURL} 
+                alt={displayName} 
+                className="w-full h-full object-cover"
+                onError={() => setAvatarFailed(true)}
+              />
+            ) : initials ? (
+              <span className="text-xs font-semibold text-foreground/80">{initials}</span>
+            ) : (
+              <User className="w-4 h-4 text-foreground/70" />
+            )}
+          </div>
           <Button variant="ghost" size="icon" onClick={logout}>
             <LogOut className="w-5 h-5" />
           </Button>
@@ -102,7 +153,7 @@ const LobbyScreen: React.FC = () => {
           {/* Welcome message */}
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-foreground mb-2">
-              Welcome, {user?.displayName?.split(' ')[0]}!
+              Welcome, {displayName.split(' ')[0]}!
             </h1>
             <p className="text-muted-foreground">
               Create a room or join with a code
@@ -146,21 +197,39 @@ const LobbyScreen: React.FC = () => {
                   </Button>
                 </div>
               ) : (
-                <Button 
-                  onClick={handleCreateRoom} 
-                  disabled={isCreating}
-                  className="w-full"
-                  size="lg"
-                >
-                  {isCreating ? (
-                    <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <Plus className="w-5 h-5 mr-2" />
-                      Create Room
-                    </>
-                  )}
-                </Button>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button 
+                    onClick={handleCreateRoom} 
+                    disabled={isCreating}
+                    className="w-full sm:flex-1 min-w-0 text-sm sm:text-base"
+                    size="lg"
+                  >
+                    {isCreating ? (
+                      <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Plus className="w-5 h-5 mr-2" />
+                        Create Room
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={handleCreateRoomWithBots}
+                    disabled={isCreatingWithBots}
+                    className="w-full sm:flex-1 min-w-0 text-sm sm:text-base"
+                    size="lg"
+                    variant="secondary"
+                  >
+                    {isCreatingWithBots ? (
+                      <div className="w-5 h-5 border-2 border-secondary-foreground/30 border-t-secondary-foreground rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Users className="w-5 h-5 mr-2" />
+                        Vs Bots
+                      </>
+                    )}
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>

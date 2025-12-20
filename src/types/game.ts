@@ -18,6 +18,7 @@ export interface Player {
   revealed: boolean;
   score: number;
   createdAt: number;
+  isBot?: boolean;
 }
 
 export interface Room {
@@ -45,8 +46,8 @@ export const ROLE_NAMES: Record<Role, string> = {
 };
 
 export const ROLE_COLORS: Record<Role, string> = {
-  badshah: 'bg-badshah text-primary-foreground',
-  vizier: 'bg-vizier text-primary-foreground',
-  qazi: 'bg-accent text-accent-foreground',
-  chor: 'bg-chor text-primary-foreground',
+  badshah: 'bg-badshah',
+  vizier: 'bg-vizier',
+  qazi: 'bg-accent',
+  chor: 'bg-chor',
 };
