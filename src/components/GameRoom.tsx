@@ -77,6 +77,7 @@ const GameRoom: React.FC = () => {
   const lastGuessTargetRef = useRef<string | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const viewportRef = useRef({ width: 0, height: 0 });
+  const autoFillRef = useRef(false);
 
   // Ensure the current user is present in the room even when navigating via shared links
   const joinInFlightRef = useRef(false);
@@ -230,6 +231,21 @@ const GameRoom: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!roomId || !isHost || !room?.stage) return;
+    if (players.length >= 4) return;
+    if (room.stage !== 'waiting' && room.stage !== 'scoring') return;
+    if (autoFillRef.current) return;
+    autoFillRef.current = true;
+    void fillBotsToCapacity(roomId)
+      .catch((err: any) => {
+        console.warn('[GameRoom] auto-fill bots failed', err);
+      })
+      .finally(() => {
+        autoFillRef.current = false;
+      });
+  }, [roomId, isHost, room?.stage, players.length, fillBotsToCapacity]);
+
   const showBanner = useCallback((text: string, tone: 'neutral' | 'accent' = 'neutral') => {
     setBannerText(text);
     setBannerTone(tone);
@@ -301,6 +317,12 @@ const GameRoom: React.FC = () => {
   }, [room?.stage]);
 
   useEffect(() => {
+    if (room?.stage) {
+      setSelectedTarget(null);
+    }
+  }, [room?.stage]);
+
+  useEffect(() => {
     if (!room?.stage) return;
     if (room.stage === lastStageRef.current) return;
     const isVizier = currentPlayer?.privateRole === 'vizier';
@@ -308,17 +330,17 @@ const GameRoom: React.FC = () => {
     let tone: 'neutral' | 'accent' = 'neutral';
 
     if (room.stage === 'badshah_reveal') {
-      nextBanner = 'Game started • Badshah reveal';
+      nextBanner = 'Game started - Badshah reveal';
     } else if (room.stage === 'vizier_reveal') {
-      nextBanner = 'Badshah revealed • Vizier reveal';
+      nextBanner = 'Badshah revealed - Vizier reveal';
     } else if (room.stage === 'vizier_guess') {
       if (!currentPlayer?.privateRole) {
         return;
       }
-      nextBanner = isVizier ? 'Your turn • Pick the Chor and press Guess' : 'Vizier is guessing';
+      nextBanner = isVizier ? 'Your turn - Tap a player to guess' : 'Vizier is guessing';
       tone = 'accent';
     } else if (room.stage === 'final_reveal') {
-      nextBanner = 'Guess locked • Revealing roles';
+      nextBanner = 'Guess locked - Revealing roles';
     } else if (room.stage === 'scoring') {
       nextBanner = 'Scores updated';
     }
@@ -342,16 +364,6 @@ const GameRoom: React.FC = () => {
     lastGuessTargetRef.current = selectedTarget;
     showBanner(`Tap "Guess" to accuse ${targetName}`, 'accent');
   }, [canGuess, selectedTarget, players, showBanner]);
-
-  // Auto-select a target when vizier needs to guess to reduce extra taps
-  useEffect(() => {
-    if (!canGuess) return;
-    if (selectedTarget) return;
-    const candidate = players.find(p => !p.revealed && p.uid !== selfId);
-    if (candidate) {
-      setSelectedTarget(candidate.uid);
-    }
-  }, [canGuess, selectedTarget, players, selfId]);
 
   const selfAction = (() => {
     if (canRevealBadshah) {
